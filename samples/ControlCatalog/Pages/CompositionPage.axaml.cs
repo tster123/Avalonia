@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Numerics;
 using System.Threading;
 using Avalonia;
@@ -223,6 +224,7 @@ public partial class CompositionPage : UserControl
         private TimeSpan? _lastServerTime;
         private bool _running;
         private bool _preciseDirtyRects;
+        private bool _addRandomRect;
 
         public static readonly object StopMessage = new(),
             StartMessage = new(),
@@ -240,11 +242,11 @@ public partial class CompositionPage : UserControl
             }
             
             _ellipses.Clear();
-            
+
             const int cnt = 20;
             var maxPointSizeX = EffectiveSize.X / (cnt * 1.6);
             var maxPointSizeY = EffectiveSize.Y / 4;
-            var pointSize = Math.Min(maxPointSizeX, maxPointSizeY);
+            var pointSize = Math.Min(20, Math.Min(maxPointSizeX, maxPointSizeY));
             var animationLength = TimeSpan.FromSeconds(4);
             var animationStage = _animationElapsed.TotalSeconds / animationLength.TotalSeconds;
 
@@ -265,15 +267,24 @@ public partial class CompositionPage : UserControl
                     (byte)(255 * Math.Abs(0.5 - colorStage) * 2),
                     (byte)(255 * colorStage)
                 ), opacity)));
+                if (c >= 2) break;
             }
         }
         
         public override void OnRender(ImmediateDrawingContext drawingContext)
         {
+            writer.WriteLine($"Rendering");
             if (_ellipses.Count == 0)
                 UpdateRects();
-            
-            foreach(var e in _ellipses)
+
+            if (_addRandomRect)
+            {
+                _addRandomRect = false;
+                Random r = new Random();
+                drawingContext.DrawRectangle(new ImmutableSolidColorBrush(Colors.Coral), null, new Rect(30 + r.NextDouble() * 200, 30 + r.NextDouble() * 200, 800 + r.NextDouble() * 400, 600 + r.NextDouble() * 400));
+            }
+
+            foreach (var e in _ellipses)
                 drawingContext.DrawEllipse(e.brush, null, e.center, e.size, e.size);
         }
 
@@ -283,6 +294,7 @@ public partial class CompositionPage : UserControl
             {
                 _running = true;
                 _lastServerTime = null;
+                _addRandomRect = true;
                 RegisterForNextAnimationFrameUpdate();
             }
             else if (message == StopMessage)
@@ -293,22 +305,45 @@ public partial class CompositionPage : UserControl
                 _preciseDirtyRects = false;
         }
 
+
+        private StreamWriter? _writer;
+
+        private StreamWriter? writer
+        {
+            get
+            {
+                if (_writer == null)
+                {
+                    var fs = File.OpenWrite("C:\\temp\\log.txt");
+                    _writer = new StreamWriter(fs);
+                    _writer.AutoFlush = true;
+                }
+                return _writer;
+            }
+        }
         void InvalidateCurrentEllipseRects()
         {
+
             foreach (var e in _ellipses)
-                Invalidate(new Rect(e.center.X - e.size, e.center.Y - e.size, e.size * 2, e.size * 2));
+            {
+                double x = Math.Max(0, e.center.X - e.size);
+                Rect r = new Rect(x, Math.Max(0, e.center.Y - e.size), 
+                    Math.Min(e.size * 2, EffectiveSize.X - x), e.size * 2);
+                Invalidate(r);
+                writer.WriteLine($"Invalidating: ({r.X}, {r.Y}) : ({r.Right}, {r.Bottom})  -- EFFECTIVE=({EffectiveSize.X}, {EffectiveSize.Y})");
+            }
         }
         
         public override void OnAnimationFrameUpdate()
         {
             if (_running)
             {
-                if (_preciseDirtyRects)
+                if (_preciseDirtyRects && !_addRandomRect)
                     InvalidateCurrentEllipseRects();
                 else
                     Invalidate();
                 UpdateRects();
-                if(_preciseDirtyRects)
+                if(_preciseDirtyRects && !_addRandomRect)
                     InvalidateCurrentEllipseRects();
                 RegisterForNextAnimationFrameUpdate();
             }
